@@ -1,4 +1,4 @@
-# extract_data_using_llm
+# Data extraction using LLM models(DistilBERT or Azure OpenAI)
 
 Extraction automatique d'informations de documents non structurés
 
