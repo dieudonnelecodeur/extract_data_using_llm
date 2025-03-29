@@ -14,7 +14,7 @@ Ce projet vise à :
 
 ## Features
 - Extract text content from PDFs using the `unstructured` library.
-- Perform metadata extraction using Hugging Face's `distilbert-base-cased-distilled-squad` model.
+- Perform metadata extraction using Hugging Face's `distilbert-base-cased-distilled-squad` model or AzureOpenAPI
 - Save extracted metadata as JSON and CSV files.
 - Process multiple PDFs in a directory.
 
@@ -38,14 +38,14 @@ Ce projet vise à :
    ```
 
 3. Install Poppler:
-   - On Windows, download Poppler from Poppler for Windows and add the bin folder to your system's PATH.
+   - On Windows, download Poppler from Poppler for Windows and add the bin folder to your system's PATH (https://github.com/oschwartz10612/poppler-windows/releases/)
    - On Linux:
      ```bash
      sudo apt-get install tesseract-ocr
      ```
 
 4. Install Tesseract OCR:
-   - On Windows, download Tesseract from Tesseract OCR and add it to your system's PATH.
+   - On Windows, download Tesseract (24.08.0-0 Latest) from Tesseract OCR and add it to your system's PATH. [Install Tesseract via pre-built binary package](https://github.com/UB-Mannheim/tesseract/wiki)
    - On Linux:
      ```bash
      sudo apt-get install tesseract-ocr
@@ -55,8 +55,5 @@ Usage:
 
 1- Place your PDF files in the INPUT directory.
 2- Create a text file containing your prompt in the PROMPTS directory (e.g., prompt.txt).
-3- Run the script:
-
-`python extract_metadata_using_huggingface_distilbert_api.py` or
-
-`python extract_metadata_using_azure_openai_api.py`
+3- Update prompt_path variable
+4- Run the script: `py extract_metadata_using_azure_openai_api.py`
