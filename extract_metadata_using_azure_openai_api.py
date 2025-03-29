@@ -19,22 +19,26 @@ from unstructured.partition.pdf import partition_pdf
 from tenacity import retry, wait_random_exponential, stop_after_attempt
 
 # Get API key from environment variable
-#AZURE_OPENAI_API_KEY = os.getenv('AZURE_OPENAI_API_KEY')
-AZURE_API_VERSION = os.getenv('AZURE_API_VERSION')
-AZURE_ENDPOINT = os.getenv('AZURE_ENDPOINT')
+AZURE_OPENAI_API_KEY = os.getenv('AZURE_OPENAI_API_KEY')
+AZURE_API_VERSION = os.getenv('AZURE_API_VERSION') #exemple 2024-06-01-preview
+AZURE_ENDPOINT = os.getenv('AZURE_ENDPOINT') #exemple https://example-endpoint.openai.azure.com for Azure OpenAI
+model_ID = os.getenv('GPT_MODEL') #exemple gpt-4o-2024-08-06
 
-# gets the API Key from environment variable AZURE_OPENAI_API_KEY
+# This gets the API Key from environment variable AZURE_OPENAI_API_KEY(So set it on your local machine)
 client = AzureOpenAI(
+    api_key=AZURE_OPENAI_API_KEY,
     # https://learn.microsoft.com/en-us/azure/ai-services/openai/reference#rest-api-versioning
     api_version=AZURE_API_VERSION,
     # https://learn.microsoft.com/en-us/azure/cognitive-services/openai/how-to/create-resource?pivots=web-portal#create-a-resource
     azure_endpoint=AZURE_ENDPOINT,
 )
 
-# Configuration for Tesseract OCR
+
+# Configuration for Tesseract OCR(On Linux, you may need to set the path to the Tesseract binary in the tesseract_cmd variable)
+#pytesseract.pytesseract.tesseract_cmd = os.getenv('TESSERACT_CMD', r'/usr/bin/tesseract')
 pytesseract.pytesseract.tesseract_cmd = os.getenv('TESSERACT_CMD', r'C:/Tools/Tesseract-OCR/tesseract.exe')
 
-# Configuration de Poppler pour pdf2image
+# Configuration de Poppler pour pdf2image(On Linux, you may need to set the path to the Poppler binaries in the poppler_path variable)
 poppler_path = r"C:\Tools\poppler\Library\bin"
 
 def read_prompt(prompt_path: str):
@@ -56,7 +60,7 @@ def process_directory_metadata(directory_path: str) -> str:
     extracted_data = []
     for pdf_path in directory_path.glob("*.pdf"):
         print(f"Traitement du fichier : {directory_path.name}")
-        result = extract_text_from_pdf_file_with_ocr(directory_path)
+        result = extract_text_from_pdf(directory_path)
         extracted_data.append(result)
     # return extracted_data
     return "\n".join(extracted_data)
@@ -88,51 +92,12 @@ def extract_text_from_directory(directory_path: str) -> str:
     return "\n".join(all_content)
 
 
-@staticmethod
-def is_clear_image(image_path: str, threshold: float = 10.0) -> bool:
-    """Vérifie la netteté d'une image en utilisant la détection des bords."""
-    image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
-    laplacian_var = cv2.Laplacian(image, cv2.CV_64F).var()
-
 def clean_text(self, text: str) -> str:
         """Nettoie le texte en supprimant les caractères spéciaux, les espaces inutiles et les retours à la ligne."""
         text = text.replace("\n", " ").replace("\x0c", " ")
         return " ".join(text.split())
 
-def extract_text_from_pdf_file_with_ocr(pdf_path: Path) -> str:
-    """Extract textual or image-based information from a PDF."""
-    resp = ""  # Initialize the response as an empty string
-    try:
-        with pdfplumber.open(pdf_path) as pdf:
-            # Extract text from text-based PDF pages
-            text = '\n'.join(page.extract_text() for page in pdf.pages if page.extract_text())
-            if text.strip():
-                print(f"Text-based PDF processed: {pdf_path}")
-                resp = clean_text(text)
-            else:
-                print(f"Image-based PDF detected: {pdf_path}")
-                
-                # Convert PDF pages to images
-                images = convert_from_path(pdf_path, dpi=300, poppler_path=poppler_path)
-                for i, image in enumerate(images):
-                    temp_image_path = Path(output_folder) / f"temp_page_{i}.png"
-                    image.save(temp_image_path)
 
-                    # Check if the image is clear
-                    if is_clear_image(str(temp_image_path)):
-                        print(f"Clear image detected: {temp_image_path}")
-                        ocr_text = pytesseract.image_to_string(str(temp_image_path), lang="eng+fra")
-                        resp += clean_text(ocr_text) + "\n"
-                    else:
-                        print(f"Blurred image detected in PDF {pdf_path}")
-                        break  # Stop processing if a page is blurry
-
-                    # Remove temporary image file
-                    temp_image_path.unlink()
-    except Exception as e:
-        print(f"Error processing {pdf_path}: {e}")
-
-    return resp
 
 @retry(wait=wait_random_exponential(min=1, max=120), stop=stop_after_attempt(10))
 def completion_with_backoff(**kwargs):
@@ -155,17 +120,17 @@ def extract_metadata(content: str, prompt_path: str)-> dict:
     print(f"Prompt: {prompt_data}")
 
     try:
-        response = client.question_answering(
-                inputs={
-                "question": prompt_data,
-                "context": content
-            },
-                model="distilbert/distilbert-base-cased-distilled-squad",
+        response = completion_with_backoff(
+                model=model_ID,
+                messages=[
+                    {"role": "system", "content": content},
+                    {"role": "user", "content": prompt_data},
+                ],
             )
-
         print(f"Response from the model: {response}")
 
         response_content = response.choices[0].message.content
+        print(response.model_dump_json(indent=2))
         if not response_content:
             print("Empty response from the model")
             return {}
@@ -202,8 +167,7 @@ def extract_metadata(content: str, prompt_path: str)-> dict:
         print(f"Error calling OpenAI API: {e}")
         return {}
 
-
-def process_research_paper(content: str, prompt_path: str, output_folder: str):
+def process_files_content(content: str, prompt_path: str, output_folder: str):
     """
     Process a single research paper through the entire pipeline.
     """
@@ -215,7 +179,7 @@ def process_research_paper(content: str, prompt_path: str, output_folder: str):
         content = content.encode('utf-8', errors='ignore').decode('utf-8')
 
         # Step 1: Read the prompt
-        prompt = read_prompt(prompt_path)
+        prompt = clean_text(read_prompt(prompt_path))
 
         # Step 2: Extract metadata using the model
         metadata = extract_metadata(content, prompt)
@@ -267,7 +231,7 @@ def process_directory(prompt_path: str, directory_path: str, output_folder: str)
         print(f"Processing file: {pdf_path.name}")
         content=extract_text_from_directory(directory_path)
         
-    process_research_paper(content, prompt_path, str(output_folder))
+    process_files_content(content, prompt_path, str(output_folder))
 
             
 # Define paths
