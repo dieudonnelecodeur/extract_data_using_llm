@@ -1,0 +1,27 @@
+Carte nationale d'identité :
+
+Vous êtes un expert en extraction d'informations à partir de documents officiels. Veuillez analyser attentivement la carte nationale d'identité fournie ci-dessus et extraire les sept (7) caractéristiques suivantes :
+
+    Numéro : Le numéro unique de la carte nationale d'identité.
+
+    Nom : Le nom de famille du titulaire.
+
+    Prénom : Le ou les prénoms du titulaire.
+
+    Date de naissance : La date de naissance du titulaire (format : JJ/MM/AAAA).
+
+    Lieu de naissance : La ville ou le pays de naissance du titulaire.
+
+    Profession : La profession indiquée sur la carte.
+
+    Date d'expiration : La date d’expiration de la carte nationale d’identité (format : JJ/MM/AAAA).
+
+Directives :
+
+    Les informations extraites doivent être factuelles et conformes aux données du document.
+
+    Ne faites aucune supposition si une information est manquante ; laissez le champ vide.
+
+    Les valeurs doivent être auto-suffisantes et compréhensibles sans le document d’origine.
+
+    Répondez en format JSON avec les clés suivantes : "Numero", "Nom", "Prenom", "DateNaissance", "LieuNaissance", "Profession", "DateExpiration".

@@ -22,18 +22,18 @@ from huggingface_hub import InferenceClient
 # Get values from environment variable
 HUGGINGFACE_PROVIDER = os.getenv('HUGGINGFACE_PROVIDER')
 HUGGINGFACE_API_KEY = os.getenv('HUGGINGFACE_API_KEY')
+
 client = InferenceClient(
     provider=HUGGINGFACE_PROVIDER,
     api_key=HUGGINGFACE_API_KEY,
 )
 
-client = InferenceClient()
 
-
-# Configuration for Tesseract OCR
+# Configuration for Tesseract OCR(On Linux, you may need to set the path to the Tesseract binary in the tesseract_cmd variable)
+#pytesseract.pytesseract.tesseract_cmd = os.getenv('TESSERACT_CMD', r'/usr/bin/tesseract')
 pytesseract.pytesseract.tesseract_cmd = os.getenv('TESSERACT_CMD', r'C:/Tools/Tesseract-OCR/tesseract.exe')
 
-# Configuration de Poppler pour pdf2image
+# Configuration de Poppler pour pdf2image(On Linux, you may need to set the path to the Poppler binaries in the poppler_path variable)
 poppler_path = r"C:\Tools\poppler\Library\bin"
 
 def read_prompt(prompt_path: str):
@@ -55,9 +55,10 @@ def process_directory_metadata(directory_path: str) -> str:
     extracted_data = []
     for pdf_path in directory_path.glob("*.pdf"):
         print(f"Traitement du fichier : {directory_path.name}")
-        result = extract_text_from_pdf_file_with_ocr(directory_path)
+        result = extract_text_from_pdf(directory_path)
         extracted_data.append(result)
-    # return extracted_data
+    
+    # Concatenate all extracted data into a single string
     return "\n".join(extracted_data)
 
 def extract_text_from_directory(directory_path: str) -> str:
@@ -87,83 +88,40 @@ def extract_text_from_directory(directory_path: str) -> str:
     return "\n".join(all_content)
 
 
-@staticmethod
-def is_clear_image(image_path: str, threshold: float = 10.0) -> bool:
-    """Vérifie la netteté d'une image en utilisant la détection des bords."""
-    image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
-    laplacian_var = cv2.Laplacian(image, cv2.CV_64F).var()
-
-def clean_text(self, text: str) -> str:
+def clean_text(text: str) -> str:
         """Nettoie le texte en supprimant les caractères spéciaux, les espaces inutiles et les retours à la ligne."""
         text = text.replace("\n", " ").replace("\x0c", " ")
         return " ".join(text.split())
-
-def extract_text_from_pdf_file_with_ocr(pdf_path: Path) -> str:
-    """Extract textual or image-based information from a PDF."""
-    resp = ""  # Initialize the response as an empty string
-    try:
-        with pdfplumber.open(pdf_path) as pdf:
-            # Extract text from text-based PDF pages
-            text = '\n'.join(page.extract_text() for page in pdf.pages if page.extract_text())
-            if text.strip():
-                print(f"Text-based PDF processed: {pdf_path}")
-                resp = clean_text(text)
-            else:
-                print(f"Image-based PDF detected: {pdf_path}")
-                
-                # Convert PDF pages to images
-                images = convert_from_path(pdf_path, dpi=300, poppler_path=poppler_path)
-                for i, image in enumerate(images):
-                    temp_image_path = Path(output_folder) / f"temp_page_{i}.png"
-                    image.save(temp_image_path)
-
-                    # Check if the image is clear
-                    if is_clear_image(str(temp_image_path)):
-                        print(f"Clear image detected: {temp_image_path}")
-                        ocr_text = pytesseract.image_to_string(str(temp_image_path), lang="eng+fra")
-                        resp += clean_text(ocr_text) + "\n"
-                    else:
-                        print(f"Blurred image detected in PDF {pdf_path}")
-                        break  # Stop processing if a page is blurry
-
-                    # Remove temporary image file
-                    temp_image_path.unlink()
-    except Exception as e:
-        print(f"Error processing {pdf_path}: {e}")
-
-    return resp
 
 
 @retry(wait=wait_random_exponential(min=1, max=120), stop=stop_after_attempt(10))
 def completion_with_backoff(**kwargs):
     try:
-        # return client.chat.completions.create(**kwargs)
-        return openai.chat.completions.create(**kwargs)
+        return  client.question_answering(**kwargs)
     
     except Exception as e:
         print(f"Error during API call: {e}")
         raise
 
 
-def extract_metadata(content: str, prompt_path: str)-> dict:
+def extract_metadata(content: str, prompt: str)-> dict:
     """
     Use GPT model to extract metadata from the research paper content based on the given prompt.
     """
 
     # Read the prompt
-    print(f"Reading prompt from {prompt_path}")
-    prompt_data = read_prompt(prompt_path)
-    print(f"Prompt: {prompt_data}")
-
+    print(f"Reading prompt from {prompt}")
+  
+    prompt_data = clean_text(read_prompt(prompt))
+    
     try:
-        response = client.question_answering(
-                inputs={
-                "question": prompt_data,
-                "context": content
-            },
-                model="distilbert/distilbert-base-cased-distilled-squad",
-            )
-
+        # Call the Bert model to extract metadata
+        response = completion_with_backoff(
+            question=prompt_data,
+            context=content,
+            model="distilbert/distilbert-base-cased-distilled-squad",
+        )
+        
         print(f"Response from the model: {response}")
 
         response_content = response.choices[0].message.content
@@ -174,6 +132,8 @@ def extract_metadata(content: str, prompt_path: str)-> dict:
         # Remove any markdown code block indicators
         response_content = re.sub(r'```json\s*', '', response_content)
         response_content = re.sub(r'\s*```', '', response_content)
+        
+        print(f"Response content: {response_content}")
 
         # Attempt to parse JSON into dictionary
         try:
@@ -191,24 +151,17 @@ def extract_metadata(content: str, prompt_path: str)-> dict:
                     print(f"Failed to extract valid JSON from the response: {jde}")
 
             return {}
-        
-    except openai.error.RateLimitError as e:
-        print(f"Rate limit exceeded: {e}")
-    except openai.error.InsufficientQuotaError as e:
-        print(f"Insufficient quota: {e}")
-    except Exception as e:
-        print(f"Error calling OpenAI API: {e}")
 
     except Exception as e:
-        print(f"Error calling OpenAI API: {e}")
+        print(f"Error during extract metadata: {e}")
         return {}
 
 
-def process_research_paper(content: str, prompt_path: str, output_folder: str):
+def process_files_content(content: str, prompt_path: str, output_folder: str):
     """
-    Process a single research paper through the entire pipeline.
+    Process files contente through the entire pipeline.
     """
-    print("Processing research paper...")
+    print("Processing files contentes...")
     file_name = "output"
 
     try:
@@ -216,7 +169,8 @@ def process_research_paper(content: str, prompt_path: str, output_folder: str):
         content = content.encode('utf-8', errors='ignore').decode('utf-8')
 
         # Step 1: Read the prompt
-        prompt = read_prompt(prompt_path)
+        prompt = clean_text(read_prompt(prompt_path))
+        print(f"Cleaned Prompt: {prompt}")
 
         # Step 2: Extract metadata using the model
         metadata = extract_metadata(content, prompt)
@@ -239,7 +193,6 @@ def process_research_paper(content: str, prompt_path: str, output_folder: str):
         output_path_csv = os.path.join(output_folder, output_filename_csv)
 
         # Save metadata as CSV
-        # If metadata is a nested dictionary, flatten it for CSV
         if isinstance(metadata, dict):
             df = pd.DataFrame([metadata])  # Wrap metadata in a list to create a DataFrame
         else:
@@ -250,7 +203,7 @@ def process_research_paper(content: str, prompt_path: str, output_folder: str):
         print(f"Metadata saved as CSV to {output_path_csv}")
 
     except Exception as e:
-        print(f"Error processing research paper: {e}")
+        print(f"Error processing paper: {e}")
         
 
 def process_directory(prompt_path: str, directory_path: str, output_folder: str):
@@ -265,14 +218,17 @@ def process_directory(prompt_path: str, directory_path: str, output_folder: str)
     content =""
     # Iterate through all PDF files in the directory
     for pdf_path in directory_path.glob("*.pdf"):
-        print(f"Processing file: {pdf_path.name}")
         content=extract_text_from_directory(directory_path)
-    process_research_paper(content, prompt_path, str(output_folder))
+        
+    process_files_content(content, prompt_path, str(output_folder))
 
             
 # Define paths
 prompt_path = "./PROMPTS/prompt.txt"
 directory_path = "./INPUT"
 output_folder = "./OUTPUT/extracted_metadata"
+
+# This test huggingface API call
+# extract_metadata(clean_text(extract_text_from_directory(directory_path)),prompt_path)
 
 process_directory(prompt_path, directory_path, output_folder)
